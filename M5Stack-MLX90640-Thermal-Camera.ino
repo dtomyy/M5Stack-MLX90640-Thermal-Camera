@@ -1,5 +1,5 @@
-
-
+// update 3 :mirror image
+// reverseScreen=true/false, turn=front camera, false=Selfie
 /*
   Read the temperature pixels from the MLX90640 IR array
   By: Nathan Seidle
@@ -31,7 +31,7 @@
 #include <M5Stack.h>
 #include <Wire.h>
 
-#include "M5StackUpdater.h"
+//#include "M5StackUpdater.h"
 
 #include "MLX90640_API.h"
 #include "MLX90640_I2C_Driver.h"
@@ -42,16 +42,26 @@ const byte MLX90640_address = 0x33; //Default 7-bit unshifted address of the MLX
 
 #define AMG_COLS 32
 #define AMG_ROWS 24
+
+float pixelsArraySize = AMG_COLS * AMG_ROWS;  //count 1 once
+
 float pixels[AMG_COLS * AMG_ROWS];
 
-#define INTERPOLATED_COLS 32 
-#define INTERPOLATED_ROWS 28 
+//# define reversePixels [pixelsArraySize];
+float reversePixels[AMG_COLS * AMG_ROWS];
 
-static float mlx90640To[768];
+//bool reverseScreen=false;
+bool reverseScreen=true;
+
+#define INTERPOLATED_COLS 16
+#define INTERPOLATED_ROWS 16 
+
+static float mlx90640To[AMG_COLS * AMG_ROWS];
 paramsMLX90640 mlx90640;
 
 
 float signedMag12ToFloat(uint16_t val);
+
 
 //low range of the sensor (this will be blue on the screen)
 int MINTEMP = 22;
@@ -107,15 +117,23 @@ float cubicInterpolate(float p[], float x);
 float bicubicInterpolate(float p[], float x, float y);
 void interpolate_image(float *src, uint8_t src_rows, uint8_t src_cols, float *dest, uint8_t dest_rows, uint8_t dest_cols);
 
+int size = sizeof(reversePixels);
+long loopTime,startTime,endTime,fps;
+
 void setup()
 {
   M5.begin();  
   Wire.begin();
+
+/*  
+ *   //M5StackUpdater
   if(digitalRead(BUTTON_A_PIN) == 0) {
     Serial.println("Will Load menu binary");
     updateFromFS(SD);
     ESP.restart();
   }
+*/
+  
 //  Wire.setClock(400000); //Increase I2C clock speed to 400kHz
   Wire.setClock(600000); //Increase I2C clock speed to 600kHz
 //Wire.setClock(800000); //Increase I2C clock speed to 800kHz
@@ -124,7 +142,7 @@ void setup()
   Serial.begin(115200);
 
   M5.Lcd.begin();
-  M5.Lcd.setRotation(1);
+  M5.Lcd.setRotation(0);
   
   M5.Lcd.fillScreen(TFT_BLACK);
   M5.Lcd.setTextColor(YELLOW, BLACK);
@@ -183,17 +201,21 @@ void setup()
 
 void loop()
 {
+  loopTime = millis();
+  startTime = loopTime;
+//  Serial.print("Loop Start Time: ");  
+//  Serial.print(loopTime); 
   ///////////////////////////////
   // Set Min Value - LongPress //
   ///////////////////////////////
   if (M5.BtnA.pressedFor(1000)) { 
-    if (MINTEMP <= resetMinTemp)
+    if (MINTEMP <= min_v +10)
     {
-      MINTEMP = MINTEMP - 1;
+      MINTEMP = MAXTEMP - 10;
     }
     else
     {
-      MINTEMP = MAXTEMP - 10;
+      MINTEMP = MINTEMP - 10;
     }
     infodisplay();
   }
@@ -217,8 +239,8 @@ void loop()
   // Reset settings  //
   /////////////////////
   if (M5.BtnB.wasPressed()) {
-    MINTEMP = 20;
-    MAXTEMP = 32;
+    MINTEMP = max_v - 12;
+    MAXTEMP = max_v - 2;
     infodisplay();
   }
   
@@ -282,7 +304,7 @@ void loop()
     float emissivity = 0.95;
 
     //MLX90640_CalculateTo(mlx90640Frame, &mlx90640, emissivity, tr, mlx90640To);
-    MLX90640_CalculateTo(mlx90640Frame, &mlx90640, emissivity, tr, pixels);
+    MLX90640_CalculateTo(mlx90640Frame, &mlx90640, emissivity, tr, pixels); //save pixels temp to array (pixels)
   }
 
 
@@ -303,14 +325,47 @@ void loop()
   Serial.println("");
   Serial.println("");  //extra line
 */
- Serial.println("Temp stop ouput tmp values");
+
+  
+  
+//Reverse image (order of Integer array)
+if (reverseScreen == 1)
+{
+   for (int x = 0 ; x < pixelsArraySize ; x++)   
+   {    
+//       Serial.print(String(pixels[x]));
+//       Serial.print(" ");
+       if(x % AMG_COLS == 0) //32 values wide
+       { 
+//          Serial.println(": pixels");  //space instead of comma
+          for (int j = 0+x, k = AMG_COLS+x; j < AMG_COLS+x ; j++, k--)
+          {
+             reversePixels[j]=pixels[k];
+//             Serial.print("j:" + String(j));  //no fractions
+//             Serial.print(" k:" + String(k) + ", ");
+//             if ( j >= AMG_COLS+x )    Serial.println(": reversePixels");  //space instead of comma
+          }
+       }
+   }
+}   
+      
+ //Serial.println("loop done.");
 
   float dest_2d[INTERPOLATED_ROWS * INTERPOLATED_COLS];
 
 
  // *  temp stop display image
+
+if (reverseScreen == 1)
+{
+// ** reversePixels
+  interpolate_image(reversePixels, AMG_ROWS, AMG_COLS, dest_2d, INTERPOLATED_ROWS, INTERPOLATED_COLS);
+}
+else
+{
 //interpolate_image(float *src, src_rows, src_cols, *dest, dest_rows, dest_cols);
   interpolate_image(pixels, AMG_ROWS, AMG_COLS, dest_2d, INTERPOLATED_ROWS, INTERPOLATED_COLS);
+}
 
 //  uint16_t boxsize = min(M5.Lcd.width() / INTERPOLATED_COLS, M5.Lcd.height() / INTERPOLATED_COLS);
 uint16_t boxsize = min(M5.Lcd.width() / INTERPOLATED_ROWS, M5.Lcd.height() / INTERPOLATED_COLS);
@@ -319,7 +374,7 @@ uint16_t boxsize = min(M5.Lcd.width() / INTERPOLATED_ROWS, M5.Lcd.height() / INT
 //  drawpixels(dest_2d, INTERPOLATED_ROWS, INTERPOLATED_COLS, boxsize, boxsize, false);
 
 uint16_t boxWidth = M5.Lcd.width() / INTERPOLATED_ROWS;
-uint16_t boxHeight = M5.Lcd.height() / INTERPOLATED_COLS;
+uint16_t boxHeight = (M5.Lcd.height()-31) / INTERPOLATED_COLS; // 31 for bottom info
 drawpixels(dest_2d, INTERPOLATED_ROWS, INTERPOLATED_COLS, boxWidth, boxHeight, false);
 
   max_v = INT_MIN;
@@ -346,16 +401,16 @@ drawpixels(dest_2d, INTERPOLATED_ROWS, INTERPOLATED_COLS, boxWidth, boxHeight, f
   M5.Lcd.setTextSize(2);
 //  M5.Lcd.fillRect(284, 18, 36, 16, TFT_BLACK);  // clear max temp text
   M5.Lcd.fillRect(164, 220, 75, 18, TFT_BLACK);  // clear max temp text
-  
+
 //  M5.Lcd.fillRect(284, 130, 36, 16, TFT_BLACK); // clear spot temp text
   M5.Lcd.fillRect(85, 220, 90, 18, TFT_BLACK); // clear spot temp text
   
 //  M5.Lcd.setCursor(284, 18);      // update max temp text
 //  M5.Lcd.setCursor(200, 224);      // update max temp text
-    M5.Lcd.setCursor(164, 224);      // update max temp text with "Max"
+    M5.Lcd.setCursor(163, 222);      // update max temp text with "Max"
 
   M5.Lcd.setTextColor(TFT_WHITE);
-  if (max_v > 80 | max_v < 0) {
+  if (max_v > max_cam_v | max_v < min_cam_v) {
     M5.Lcd.setTextColor(TFT_RED);
     M5.Lcd.printf("Err", 1);
   }
@@ -367,10 +422,10 @@ drawpixels(dest_2d, INTERPOLATED_ROWS, INTERPOLATED_COLS, boxWidth, boxHeight, f
     M5.Lcd.printf("C" , 1);
 
 //    M5.Lcd.setCursor(284, 130); // update spot temp text
-    M5.Lcd.drawCircle(95, 232, 6, TFT_WHITE);          // update spot icon
-    M5.Lcd.drawLine(95, 224, 95, 240, TFT_WHITE);
-    M5.Lcd.drawLine(85, 232, 105, 232, TFT_WHITE);
-    M5.Lcd.setCursor(106, 224); // update spot temp text
+    M5.Lcd.drawCircle(95, 230, 6, TFT_WHITE);          // update spot icon
+    M5.Lcd.drawLine(95, 221, 95, 239, TFT_WHITE);   // vertical line
+    M5.Lcd.drawLine(86, 230, 104, 230, TFT_WHITE);   // horizontal line
+    M5.Lcd.setCursor(106, 222); // update spot temp text
     M5.Lcd.print(spot_v, 1);
     M5.Lcd.printf("C" , 1);
     M5.Lcd.drawCircle(160, 120, 6, TFT_WHITE);          // update center spot icon
@@ -380,6 +435,19 @@ drawpixels(dest_2d, INTERPOLATED_ROWS, INTERPOLATED_COLS, boxWidth, boxHeight, f
   }  
 
 //delay(1000);  
+//  Serial.print(", Loop End Time: ");
+  loopTime = millis();
+  endTime = loopTime;
+//  Serial.print(loopTime); 
+//  Serial.print(", ");
+  fps=1000 / (endTime - startTime);
+  
+ M5.Lcd.fillRect(300, 209, 20, 12, TFT_BLACK); //Clear fps text area
+// Serial.println( String( fps ) +"/fps"); 
+ M5.Lcd.setTextSize(1);
+ M5.Lcd.setCursor(284, 210);
+ M5.Lcd.print("fps:"+ String( fps ));
+ M5.Lcd.setTextSize(1);
 }
 
 
@@ -391,7 +459,7 @@ void infodisplay(void) {
 
   
   //M5.Lcd.fillRect(0, 0, 36, 16, TFT_BLACK);
-  M5.Lcd.fillRect(284, 224, 320, 240, TFT_BLACK); //Clear MaxTemp area
+  M5.Lcd.fillRect(284, 223, 320, 240, TFT_BLACK); //Clear MaxTemp area
   M5.Lcd.setTextSize(2);
 //  M5.Lcd.setCursor(0, 1);
 
@@ -399,17 +467,18 @@ void infodisplay(void) {
 //  M5.Lcd.setCursor(284, 208); //show max_cam_v
 //  M5.Lcd.print(max_cam_v , 1);
   
-  M5.Lcd.setCursor(284, 224); //move to bottom right 
-  M5.Lcd.print(MAXTEMP , 1);
+  M5.Lcd.setCursor(284, 222); //move to bottom right 
+  M5.Lcd.print(MAXTEMP , 1);  // update MAXTEMP
   M5.Lcd.printf("C" , 1);
   
   
 //  M5.Lcd.fillRect(0, 208, 36, 16, TFT_BLACK);
-//  M5.Lcd.setCursor(0, 208); //show min_cam_v
+  M5.Lcd.setCursor(0, 208); //show min_cam_v  
 //  M5.Lcd.print(min_cam_v , 1);
+  M5.Lcd.print(size , 1);
 
-  M5.Lcd.setCursor(0, 225);
-  M5.Lcd.fillRect(0, 225, 36, 16, TFT_BLACK);
+  M5.Lcd.setCursor(0, 222);  // update MINTEMP text
+  M5.Lcd.fillRect(0, 222, 36, 16, TFT_BLACK);
   M5.Lcd.print(MINTEMP , 1);
   M5.Lcd.printf("C" , 1);
 
@@ -420,9 +489,9 @@ void infodisplay(void) {
 //  M5.Lcd.drawCircle(300, 120, 6, TFT_WHITE);
 //  M5.Lcd.drawLine(300, 110, 300, 130, TFT_WHITE);
 //  M5.Lcd.drawLine(290, 120, 310, 120, TFT_WHITE);
-    M5.Lcd.drawCircle(95, 232, 6, TFT_WHITE);          // update spot icon
-    M5.Lcd.drawLine(95, 224, 95, 240, TFT_WHITE);
-    M5.Lcd.drawLine(85, 232, 105, 232, TFT_WHITE);
+    M5.Lcd.drawCircle(95, 231, 6, TFT_WHITE);          // update spot icon
+    M5.Lcd.drawLine(95, 223, 95, 239, TFT_WHITE);
+    M5.Lcd.drawLine(85, 231, 105, 231, TFT_WHITE);
 }
 
 void drawpixels(float *p, uint8_t rows, uint8_t cols, uint8_t boxWidth, uint8_t boxHeight, boolean showVal) {
